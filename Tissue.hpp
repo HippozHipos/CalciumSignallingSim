@@ -4,8 +4,7 @@
 #include <assert.h>
 #include <iostream>
 #include <algorithm>
-#include "GeneratedPackedTissueInfo.hpp"
-#include "GeneratedGraphTissueInfo.hpp"
+#include "TissueCellTypeList.hpp"
 #include "Cell.hpp"
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -44,7 +43,7 @@
 //(GraphTissueCellTypes for graph tissue).													//
 //Tissue then uses that to allocate a contigious buffer big enough for all the cells.		//
 //It then uses placement new to construct the cells of types provided by the type list		//
-//at correct indices in the buffer.															//		
+//at correct indices in the buffer and initializes them with the initial values.			//		
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 //Because of the reasons mention above, when using tissues, DONT DIRECTLY ASSIGN CELLS TO THE
@@ -53,13 +52,11 @@
 //data continuity, which is the whole point in doing all of this. There really is no need to do it. 
 //Instead just modify the values within the cells.
 
-//Tissues are only moveable not copyable. I see 0 reasons to copy tissue.
-
-template<class ValueType>
+template<class ValueType, class Celltypes >
 class PackedTissue
 {
 public:
-	using TypeList = PackedTissueCellTypes<ValueType>;
+	using CellTypes = Celltypes;
 	using CellType = StemCell<ValueType>;
 	int NumGapJunctions = 1;
 
@@ -85,7 +82,6 @@ public:
 	using Neighbours3D = NeighboursImpl<26>;
 	static constexpr uint8_t
 		//this was painful
-		//TODO: verified once. Check again. chance i missed something.
 		Neigh3D_TopLeftFront = 0, Neigh3D_TopLeft = 1, Neigh3D_TopLeftBack = 2,
 		Neigh3D_LeftFront = 3, Neigh3D_Left = 4, Neigh3D_LeftBack = 5,
 		Neigh3D_BottomLeftFront = 6, Neigh3D_BottomLeft = 7, Neigh3D_BottomLeftBack = 8,
@@ -119,38 +115,46 @@ public:
 		Neigh2DNoDiag_Down = 3;
 
 public:
-	PackedTissue(size_t x, size_t y, size_t z) :
+	PackedTissue(
+		const std::initializer_list<std::initializer_list<ValueType>>& initialPropertyValues,
+		size_t x, size_t y, size_t z) :
 		m_Width{ x }, m_Height{ y }, m_Depth{ z }
 	{
-		TypeList typelist = TypeList{};
+		CellTypes typelist = CellTypes{};
 		constexpr size_t typeListSize = TissueCellTypeList_Size<ValueType>(typelist);
 		size_t tissueSize = m_Width * m_Height * m_Depth;
 
-		m_Cells.resize(tissueSize);
-
-		assert(tissueSize == typeListSize && 
+		assert(tissueSize == typeListSize &&
 			"Type list size doesn't match the number of cells in the tissue");
 
+		m_Cells.resize(tissueSize);
+
 		size_t allocSize = TissueCellTypeList_SizeBytes<ValueType>(typelist);
-		m_CellStore = new uint8_t[allocSize];
+		m_CellValueStore = new uint8_t[allocSize];
+		auto cellPropertiesIt = initialPropertyValues.begin();
 
 		size_t offset = 0;
 
 		TissueCellTypeList_ConstexprForEach<typeListSize>
-		(
-				[&offset, typelist, this](auto index)
+			(
+				[&offset, &cellPropertiesIt, typelist, this](auto index)
 				{
 					constexpr size_t i = decltype(index)::I;
-					constexpr size_t numProps = CellTypeAt<i, TypeList>::type::NumProperties;
-					m_Cells[i] = new typename CellTypeAt<i, TypeList>::type
+					constexpr size_t numProps = TissueCellTypeList_CellTypeAt<i, CellTypes>::type::NumProperties;
+					m_Cells[i] = new typename TissueCellTypeList_CellTypeAt<i, CellTypes>::type
 					{
-						new (m_CellStore + offset) ValueType[numProps]
+						new (m_CellValueStore + offset) ValueType[numProps]
 					};
+					offset += numProps * sizeof(ValueType);
+					auto valueItStart = cellPropertiesIt->begin();
+					assert(cellPropertiesIt->size() == numProps && "Generated cell's number of properties dont match the"
+						"number of properties specified in the cell class");
 					for (size_t j = 0; j < numProps; j++)
 					{
-						m_Cells[i]->SetAt(j, std::numeric_limits<ValueType>::max());
+						m_Cells[i]->SetAt(j, *valueItStart);
+						std::advance(valueItStart, 1);
 					}
-					offset += numProps * sizeof(ValueType);
+					std::advance(cellPropertiesIt, 1);
 				}
 		);
 	}
@@ -160,10 +164,10 @@ public:
 		m_Width = other.m_Width;
 		m_Height = other.m_Height;
 		m_Depth = other.m_Depth;
-		m_CellStore = other.m_CellStore;
+		m_CellValueStore = other.m_CellValueStore;
 		m_Cells = std::move(m_Cells);
 
-		other.m_CellStore = nullptr;
+		other.m_CellValueStore = nullptr;
 	}
 
 	PackedTissue& operator=(PackedTissue&& other) noexcept
@@ -173,10 +177,10 @@ public:
 			m_Width = other.m_Width;
 			m_Height = other.m_Height;
 			m_Depth = other.m_Depth;
-			m_CellStore = other.m_CellStore;
+			m_CellValueStore = other.m_CellValueStore;
 			m_Cells = std::move(m_Cells);
 
-			other.m_CellStore = nullptr;
+			other.m_CellValueStore = nullptr;
 		}
 	}
 
@@ -186,18 +190,18 @@ public:
 		{
 			delete m_Cells[i];
 		}
-		delete m_CellStore;
+		delete m_CellValueStore;
 	}
 
 public:
 	CellType* GetCell(size_t x, size_t y, size_t z)
 	{
-		return m_Cells[Index(x, y, z)]; 
+		return m_Cells[Index(x, y, z)];
 	}
 
-	const CellType* const GetCellAt(size_t x, size_t y, size_t z) const 
-	{ 
-		return m_Cells[Index(x, y, z)]; 
+	const CellType* const GetCellAt(size_t x, size_t y, size_t z) const
+	{
+		return m_Cells[Index(x, y, z)];
 	}
 
 	CellType* const GetCell(size_t i)
@@ -205,8 +209,8 @@ public:
 		return m_Cells[i];
 	}
 
-	const CellType* GetCellAt(size_t i) const 
-	{ 
+	const CellType* GetCellAt(size_t i) const
+	{
 		return m_Cells[i];
 	}
 
@@ -324,20 +328,21 @@ private:
 	size_t m_Height;
 	size_t m_Depth;
 
-	//heap pointer where cells are stored
-	uint8_t* m_CellStore;
+	//buffer for all the values of all the cells in the tissue
+	uint8_t* m_CellValueStore;
 
-	//pointers to individual cells within m_CellStore.
-	//vector never resizes
+	//pointers to cells
 	std::vector<CellType*> m_Cells;
 };
 
 //for convenience 
 //values = float
-using PackedTissueF = PackedTissue<float>;
+template<class CellTypes>
+using PackedTissueF = PackedTissue<float, CellTypes>;
 
 //values = double
-using PackedTissueD = PackedTissue<double>;
+template<class CellTypes>
+using PackedTissueD = PackedTissue<double, CellTypes>;
 
 ////////////////////////////////////////////////////////////////////////////////
 //GraphTissue is a tissue class that lets you specify the connections between //
@@ -346,17 +351,19 @@ using PackedTissueD = PackedTissue<double>;
 //gap junctions.															  //
 ////////////////////////////////////////////////////////////////////////////////
 
-template<class ValueType>
+template<class ValueType, class Celltypes>
 class GraphTissue
 {
 public:
-	using TypeList = GraphTissueCellTypes<ValueType>;
+	using CellTypes = Celltypes;
 	using CellType = StemCell<ValueType>;
 
 	struct Entry
 	{
-		Entry(size_t size) 
-		{ connections.reserve(size); gapJunctions.reserve(size); }
+		Entry(size_t size)
+		{
+			connections.reserve(size); gapJunctions.reserve(size);
+		}
 		std::vector<size_t> connections;
 		std::vector<size_t> gapJunctions;
 		CellType* cell = nullptr;
@@ -369,41 +376,50 @@ public:
 		CellType* cell = nullptr;
 	};
 
-	GraphTissue()
+	GraphTissue(
+		const std::initializer_list<std::initializer_list<ValueType>>& initialPropertyValues,
+		const std::initializer_list<std::initializer_list<size_t>>& connections,
+		const std::initializer_list<std::initializer_list<size_t>>& gapJunctions)
 	{
-		TypeList typelist = TypeList{};
+		CellTypes typelist = CellTypes{};
 		constexpr size_t typeListSize = TissueCellTypeList_Size<ValueType>(typelist);
 
 		m_Cells.resize(typeListSize);
 
-		assert(typeListSize == GraphTissueConnections.size() &&
-			GraphTissueConnections.size() == GraphTissueGapJunctions.size() &&
+		assert(typeListSize == connections.size() &&
+			gapJunctions.size() == gapJunctions.size() &&
 			"Invalid Tissue info");
 
 		size_t allocSize = TissueCellTypeList_SizeBytes<ValueType>(typelist);
-		m_CellStore = new uint8_t[allocSize];
+		m_CellValueStore = new uint8_t[allocSize];
 
+		auto cellPropertiesIt = initialPropertyValues.begin();
 		size_t offset = 0;
 
 		TissueCellTypeList_ConstexprForEach<typeListSize>
 			(
-				[&offset, typelist, this](auto index)
+				[&offset, &cellPropertiesIt, &connections, &gapJunctions, typelist, this](auto index)
 				{
 					constexpr size_t i = decltype(index)::I;
-					constexpr size_t numProps = CellTypeAt<i, TypeList>::type::NumProperties;
-					m_Cells[i] = new typename CellTypeAt<i, TypeList>::type
+					constexpr size_t numProps = TissueCellTypeList_CellTypeAt<i, CellTypes>::type::NumProperties;
+					m_Cells[i] = new typename TissueCellTypeList_CellTypeAt<i, CellTypes>::type
 					{
-						new (m_CellStore + offset) ValueType[numProps]
+						new (m_CellValueStore + offset) ValueType[numProps]
 					};
+					offset += numProps * sizeof(ValueType);
+					auto valueItStart = cellPropertiesIt->begin();
+					assert(cellPropertiesIt->size() == numProps && "Generated cell's number of properties dont match the"
+						"number of properties specified in the cell class");
 					for (size_t j = 0; j < numProps; j++)
 					{
-						m_Cells[i]->SetAt(j, std::numeric_limits<ValueType>::max());
+						m_Cells[i]->SetAt(j, *valueItStart);
+						std::advance(valueItStart, 1);
 					}
+					std::advance(cellPropertiesIt, 1);
 					SetCellConnectionsAndGapJunctions(
-						*(GraphTissueConnections.begin() + i),
-						*(GraphTissueGapJunctions.begin() + i),
+						*(connections.begin() + i),
+						*(gapJunctions.begin() + i),
 						i);
-					offset += numProps * sizeof(ValueType);;
 				}
 		);
 	}
@@ -412,10 +428,10 @@ public:
 	{
 		m_Connections = std::move(m_Connections);
 		m_GapJunctions = std::move(m_GapJunctions);
-		m_CellStore = other.m_CellStore;
+		m_CellValueStore = other.m_CellValueStore;
 		m_Cells = std::move(m_Cells);
 
-		other.m_CellStore = nullptr;
+		other.m_CellValueStore = nullptr;
 	}
 
 	GraphTissue& operator=(GraphTissue&& other) noexcept
@@ -424,10 +440,10 @@ public:
 		{
 			m_Connections = std::move(m_Connections);
 			m_GapJunctions = std::move(m_GapJunctions);
-			m_CellStore = other.m_CellStore;
+			m_CellValueStore = other.m_CellValueStore;
 			m_Cells = std::move(m_Cells);
 
-			other.m_CellStore = nullptr;
+			other.m_CellValueStore = nullptr;
 		}
 	}
 
@@ -437,7 +453,7 @@ public:
 		{
 			delete m_Cells[i];
 		}
-		delete m_CellStore;
+		delete m_CellValueStore;
 	}
 
 public:
@@ -487,14 +503,14 @@ public:
 		return GetConnectionsOrGapJunctions(index, m_GapJunctions);
 	}
 
-	std::pair<std::vector<size_t>::iterator, std::vector<size_t>::iterator> 
-	GetConnectionsView(size_t index)
+	std::pair<std::vector<size_t>::iterator, std::vector<size_t>::iterator>
+		GetConnectionsView(size_t index)
 	{
 		return GetConnectionsOrGapJunctionsView(index, m_Connections);
 	}
 
 	std::pair<std::vector<size_t>::iterator, std::vector<size_t>::iterator>
-	GetGapJunctionsView(size_t index)
+		GetGapJunctionsView(size_t index)
 	{
 		return GetConnectionsOrGapJunctionsView(index, m_GapJunctions);
 	}
@@ -513,7 +529,7 @@ public:
 		{
 			connections.push_back(con.first[i]);
 			gapJunctions.push_back(gap.first[i]);
-		}	
+		}
 	}
 
 	void GetConnectionsAndGapJunctionsView(size_t index,
@@ -543,14 +559,14 @@ public:
 	bool ConnectionExists(size_t index1, size_t index2)
 	{
 		auto it1 = GetConnectionsView(index1);
-		for (auto it = it1.first; it < it1.second; it++)
+		for (auto& it = it1.first; it < it1.second; it++)
 		{
 			if (*it == index2)
 				return true;
 		}
 
 		auto it2 = GetConnectionsView(index2);
-		for (auto it = it2.first; it < it2.second; it++)
+		for (auto& it = it2.first; it < it2.second; it++)
 		{
 			if (*it == index1)
 				return true;
@@ -561,15 +577,15 @@ public:
 
 private:
 	template<class T1, class T2>
-	void SetCellConnectionsAndGapJunctions(
+	void SetCellConnectionsAndGapJunctionsImpl(
 		T1 connectionss, T2 gapJunctionss,
 		size_t index)
 	{
 		std::vector<size_t> con = connectionss;
 
-		assert(con.size() && gapJunctionss.size() &&
-			"Cannot have cell without connections."
-			"Jap junction must be specified for each connection");
+		//assert(con.size() && gapJunctionss.size() &&
+		//	"Cannot have cell without connections."
+		//	"Jap junction must be specified for each connection");
 
 		RemoveDuplicates(con);
 
@@ -593,18 +609,17 @@ private:
 		{
 			assert(connections[i] != index &&
 				"Cell cannot have connection to itself");
-			assert(gapJunctions[i] != index &&
-				"Cell cannot have gap junction to itself");
+
 
 			if (connections[i] < index)
 			{
-				//check if there is a connection from other cell to this one
+				//check if there is a connection from other cell to this one.
 				//other cell is the cell that we are trying to add the connection to
 				auto connectionOther = GetConnectionsView(connections[i]);
 				if (
 					std::find(connectionOther.first, connectionOther.second, index)
-													== 
-										connectionOther.second
+					==
+					connectionOther.second
 					)
 				{
 					//connection doesnt exist so add it
@@ -625,7 +640,9 @@ private:
 			{
 				//connection attempt to a cell that doesnt exist yet. Allow it
 				//since this cell might be added later. It the connection is 
-				//accessed without adding the cell then GG.
+				//accessed without adding the cell then GG. 
+				//NOTE: This can only happen if the connections are added by hand.
+				//If they are generated by tissue maker, this cannot happen. 
 				m_Connections.push_back(connections[i]);
 				m_GapJunctions.push_back(gapJunctions[i]);
 			}
@@ -634,37 +651,37 @@ private:
 
 	void SetCellConnectionsAndGapJunctions(
 		const std::initializer_list<size_t>& connections,
-		const std::initializer_list<size_t>& gapJunctions, 
+		const std::initializer_list<size_t>& gapJunctions,
 		size_t index)
 	{
-		SetCellConnectionsAndGapJunctions(connections, gapJunctions, index);
+		SetCellConnectionsAndGapJunctionsImpl(connections, gapJunctions, index);
 	}
 
 	void SetCellConnectionsAndGapJunctions(
 		const std::vector<size_t>& connections,
-		const std::vector<size_t>& gapJunctions, 
+		const std::vector<size_t>& gapJunctions,
 		size_t index)
 	{
-		SetCellConnectionsAndGapJunctions(connections, gapJunctions, index);
+		SetCellConnectionsAndGapJunctionsImpl(connections, gapJunctions, index);
 	}
 
-	std::vector<size_t> 
-	GetConnectionsOrGapJunctions(size_t index, std::vector<size_t>& data)
+	std::vector<size_t>
+		GetConnectionsOrGapJunctions(size_t index, std::vector<size_t>& data)
 	{
 		std::pair<std::vector<size_t>::iterator, std::vector<size_t>::iterator> it =
 			GetConnectionsOrGapJunctionsView(index, data);
-		
+
 		std::vector<size_t> out;
 		out.reserve(it.second - it.first);
-		for (auto _it = it.first; _it < it.second; _it++)
+		for (auto& _it = it.first; _it < it.second; _it++)
 		{
 			out.push_back(*_it);
 		}
 		return out;
 	}
 
-	std::pair<std::vector<size_t>::iterator, std::vector<size_t>::iterator> 
-	GetConnectionsOrGapJunctionsView(size_t index, std::vector<size_t>& data)
+	std::pair<std::vector<size_t>::iterator, std::vector<size_t>::iterator>
+		GetConnectionsOrGapJunctionsView(size_t index, std::vector<size_t>& data)
 	{
 		assert(index < m_Cells.size());
 		size_t itStartIndex = 0;
@@ -685,13 +702,16 @@ private:
 
 	void RemoveDuplicates(std::vector<size_t>& data)  const
 	{
-		std::sort(data.begin(), data.end());
-		for (int i = 0; i < data.size() - 1; i++)
+		if (!data.empty())
 		{
-			if (data[i] == data[i + 1])
+			std::sort(data.begin(), data.end());
+			for (int i = 0; i < data.size() - 1; i++)
 			{
-				data.erase(data.begin() + i);
-				i--;
+				if (data[i] == data[i + 1])
+				{
+					data.erase(data.begin() + i);
+					i--;
+				}
 			}
 		}
 	}
@@ -715,17 +735,17 @@ private:
 	//format same as m_Connections
 	std::vector<size_t> m_GapJunctions;
 
-	//heap pointer where cells are stored
-	uint8_t* m_CellStore;
+	//buffer for all the values of all the cells in the tissue
+	uint8_t* m_CellValueStore;
 
-	//pointers to individual cells within m_CellStore.
-	//vector never resizes
 	std::vector<CellType*> m_Cells;
 };
 
 //for convenience 
 //values = float
-using GraphTissueF = GraphTissue<float>;
+template<class CellTypes>
+using GraphTissueF = GraphTissue<float, CellTypes>;
 
 //values = double
-using GraphTissueD = GraphTissue<double>;
+template<class CellTypes>
+using GraphTissueD = GraphTissue<double, CellTypes>;

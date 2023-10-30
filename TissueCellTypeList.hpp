@@ -54,10 +54,10 @@ constexpr auto TissueCellTypeList_Append(TissueCellTypeList<Types...> types)
 //get the type of the cell at index
 //////////////////////////////////////////////////////////////////////////////////
 template <size_t Index, class Type>                                             //
-struct CellTypeAt;                                                              //
+struct TissueCellTypeList_CellTypeAt;                                           //
                                                                                 //
 template <size_t Index, class... Types>                                         //
-struct CellTypeAt<Index, TissueCellTypeList<Types...>>                          //
+struct TissueCellTypeList_CellTypeAt<Index, TissueCellTypeList<Types...>>       //
 {                                                                               //
     using type = typename std::tuple_element<Index, std::tuple<Types...>>::type;//
 };                                                                              //
@@ -66,7 +66,8 @@ template<class T, size_t Index, class... Types>                                 
 constexpr auto TissueCellTypeList_CellAt(TissueCellTypeList<Types...> types)    //
 {                                                                               //
     VerifyTypesDerivedFromStemCell<T>(types);                                   //
-    return typename CellTypeAt<Index, TissueCellTypeList<Types...>>::type{};    //
+    return typename TissueCellTypeList_CellTypeAt<Index,                        //
+        TissueCellTypeList<Types...>>::type{};                                  //
 }                                                                               //
 //////////////////////////////////////////////////////////////////////////////////
 
@@ -115,7 +116,7 @@ constexpr size_t TissueCellTypeList_SizeBytes(TissueCellTypeList<Types...> types
             [&size, types](auto index)
             {
             size +=
-                CellTypeAt<
+                TissueCellTypeList_CellTypeAt<
                         decltype(index)::I,
                         TissueCellTypeList<Types...>
                     >::type::NumProperties * sizeof(T_);
