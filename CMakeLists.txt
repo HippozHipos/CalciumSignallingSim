@@ -1,0 +1,6 @@
+project(cellmulator)
+cmake_minimum_required(VERSION 3.1)
+set (BUILD_ROOT Out/build CACHE INTERNAL "")
+add_subdirectory(Simulator)
+add_subdirectory(Cyclopes/src)
+add_subdirectory(Application)
