@@ -1,13 +1,12 @@
 #include "Timeline.hpp"
 #include "Tissue.hpp"
 #include <iostream>
-#include "GeneratedPackedTissueInfo.hpp"
-#include "GeneratedGraphTissueInfo.hpp"
-#include "Algorithm.hpp"
+#include <initializer_list>
 
 int main()
 {
-	
-
+	PackedTissueF tissue{ 3, 3, 3 };
+	auto cell = tissue.GetCellAt(26);
+	std::cout << cell->At(22);
 }
 

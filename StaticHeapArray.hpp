@@ -5,17 +5,18 @@
 //Exactly as the name says. Its a static heap array. 
 //The sole reason for its existance is to be able to allocate memory 
 //of the heap buffer from outside the class. std::vector doesnt let us do that. 
-//It is probably bad design but there is a good reason for it. 
-//Basically we need to allocate memory so that multiple StaticHeapArrays
+//It probably looks like bad design but there is a good reason for it. 
+//Basically need to palcement new memory so that multiple StaticHeapArrays
 //point to contigious memory. There seems to be ways to do this with std::vector
 //too with custom allocators but this seems like the simplest option to me.
  
 //NOTE: IF A VALID POINTER IS PASSED TO THE CONSTRUCTOR, IT IS EXPECTED THAT
 //THE POINTER IS PLACEMENT-NEWD SO IT IS NOT DELETED BY THE CLASS. IF NULLPTR
 //IS PASSED AS ARGUMENT, IT WILL NEW MEMORY AND DELETE IT. IF COPY CONSTRUCTOR
-//IS CALLED, IT WILL ALSO NEW MEMORY AND DELETE IT. IN OTHER WORDS, IT DELETES
-//MEMORY IF IT NEWS IT, OTHERWISE IT DOESNT. IT NEWS MEMORY WHEN NULL POINTER
-//IS PASSED TO CONSTRUCTOR OR COPY CONSTRUCTOR IS CALLED.
+//IS, IT WILL ALSO NEW MEMORY AND DELETE IT.
+
+//NOTE: COPY CONSTRUCTOR WILL ALLOCATE NEW MEMORY AND DISCARD THE OLD MEMORY 
+//TAKEN AS ARGUMENT IN THE CONSTRUCTOR.
 
 //NOTE: COPY ASIGNMENT DOES NOT RE-ALLOCATE MEMORY.
 //Since this class is strictly only used by StemCell, it doesnt make sense

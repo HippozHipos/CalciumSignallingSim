@@ -7,11 +7,6 @@
 #include <cstdlib>
 #include "Tissue.hpp"
 
-//Timeline is now redundent since we arent making a gui in the simulator anymore
-//so there is no need to store all the previous versions of the cells in memory.
-//Still keeping it since it was a lot of effort to write and maybe there will be 
-//a use for it in the future.
-
 //theese are only used in this file and undefed at the end
 #if defined(__GNUC__) || defined(__clang__) 
 	#define LIKELY(expr) (__builtin_expect(!!(expr), 1))
@@ -38,7 +33,7 @@ template<class ValueType, class TimestepType, class IDType>
 class DynamicDataBuffer
 {
 private:
-	//align to the size of largest type in the buffer
+	//align to the size to largest type in the buffer
 	template <class ValueType, class TimestepType, class IDType>
 	struct AlignmentReqImpl //alignment requirement
 	{
@@ -167,7 +162,7 @@ public:
 	//T is what to get the type as.
 	//WARNING: If PushBack() or Set() had stored a double at ptr
 	//and then Get<float> is called at that ptr, it is UNDEFINED BEHAVIOUR.
-	//It is up to caller to make sure that the data is retrieved as right type, 
+	//It is up to caller to make sure that it is retrieved as right type, 
 	//the function does no safety checks.
 	template <class T>
 	T Get(uint8_t* ptr) const
@@ -321,8 +316,11 @@ private:
 //than Iterator																		      //
 ////////////////////////////////////////////////////////////////////////////////////////////
 
-//CellTimeline can only store one particular type of cell that is provided to it as last 
-//template argument
+//WARNING: Cell timeline can only store one specific type of cell that is provided to it as 
+//template argument. It can accept any cell type as PushBack argument but only the cell that 
+//is specified as the template argument should be pushed. If any other type of cell is pushed, 
+//the class will do things that cause undefined behaviour. It will probably crash. Even if it 
+//doesn't, it isn't the intended use case.
 
 template<class Valuetype, class Timesteptype, class IDtype, class Cell>
 class CellTimelineImpl
@@ -424,11 +422,6 @@ public:
 		m_Buffer = std::move(other.m_Buffer);
 	}
 
-	//CellTimeline inherits from this class
-	virtual ~CellTimelineImpl () 
-	{
-	}
-
 	CellTimelineImpl& operator=(const CellTimelineImpl& other)
 	{
 		if LIKELY((this != &other))
@@ -468,7 +461,7 @@ public:
 	//gets the given version of the cell from the timeline
 	Version GetVersion(size_t index) const
 	{
-		Version version{};
+		Version version;
 		Entry entry = EntryFromIndex(index);
 		version.timestep = entry.timestep;
 
@@ -503,26 +496,26 @@ public:
 		return GetVersion(index);
 	}
 
-	//get the changes in the last entry
+	//get the changes in the last cell
 	IDType GetLastChanges() const
 	{
 		return m_Buffer.Get<IDType>(m_LastEntryOffset);
 	}
 
-	//get the last version from the timeline
+	//get the last cell from the timeline
 	Version GetLastVersion() const
 	{
-		Version version{};
+		Version version;
 		version.timestep = m_Buffer.Get<TimestepType>(m_LastEntryOffset + sizeof(IDType));
 		for (size_t i = 0; i < NumProperties; i++)
 			version.cell[i] = m_Buffer.Get<ValueType>(m_LastPropChangeOffset[i]);
 		return version;
 	}
 
-	//get the first entry from the timeline
+	//get the first cell from the timeline
 	Version GetFirstVersion() const
 	{
-		Version version{};
+		Version version;
 		size_t start = sizeof(IDType);
 		version.timestep = m_Buffer.Get<TimestepType>(start);
 		start += sizeof(TimestepType);
@@ -559,7 +552,7 @@ public:
 
 public:
 	//If iterating through timeline is needed USE ITERATOR. It is MASSIVELY faster than
-	//using GetVersion multiple times in a loop. Use GetVersion for one off Gets.
+	//using GetVersion multiple times. Use GetVersion for one off Gets.
 	//It is a standard iterator and works with most (std::)algorithms and functions.
 	//There are being() and end() overloads of functions returning this iterator that
 	//take index as argument as well. Not really standard but convenient. 
@@ -613,7 +606,7 @@ public:
 	public:
 		Version operator*()
 		{
-			Version v{};
+			Version v;
 			v.timestep = timeline->m_Buffer.Get<TimestepType>(m_Entry + sizeof(IDType));
 			IDType id = timeline->m_Buffer.Get<IDType>(m_Entry);
 			id &= ~((One::Value << LastTissueBit) | (One::Value << LastCellBit));
@@ -644,7 +637,7 @@ public:
 
 		VersionProperty GetVersionProperty(size_t prop)
 		{
-			VersionProperty vp{};
+			VersionProperty vp;
 			vp.timestep = timeline->m_Buffer.Get<TimestepType>(m_Entry + sizeof(IDType));
 			IDType id = timeline->m_Buffer.Get<IDType>(m_Entry);
 			id &= ~((One::Value << LastTissueBit) | (One::Value << LastCellBit));
@@ -715,7 +708,7 @@ public:
 			return *this;
 		}
 
-		Iterator operator+(size_t v)
+		/*Iterator operator+(size_t v)
 		{
 			Iterator it = *this;
 			for (size_t i = 0; i <= v; i++)
@@ -723,7 +716,7 @@ public:
 				++it;
 			}
 			return it;
-		}
+		}*/
 
 		friend bool operator==(const Iterator& i1, const Iterator& i2)
 		{
@@ -780,7 +773,7 @@ private:
 	void PushBackImpl(const Cell& cell, TimestepType timestep, bool last)
 	{
 		static_assert(std::is_same_v<CellType, Cell> || std::is_base_of_v<BaseCellType, Cell>, 
-			"Can only push back the cell type stored in this timeline or pointer to StemCell<ValueType>"
+			"Can only push back the cell type stored in this class or pointer to base"
 			"that is pointing to that type");
 
 		//FIRST ENTRY
@@ -890,7 +883,7 @@ private:
 	//constructs an entry with correct id and values that were changed.
 	CellTimelineImpl::Entry EntryFromCell(const BaseCellType& cell) const
 	{
-		Entry e{};
+		Entry e;
 		const ValueType epsilon = static_cast<ValueType>(0.001);
 		for (size_t i = 0; i < NumProperties; i++)
 		{
@@ -909,7 +902,7 @@ private:
 	//offset MUST be the start of an entry, i.e. an Index Descriptor
 	CellTimelineImpl::Entry MakeEntry(size_t offset) const
 	{
-		Entry e{};
+		Entry e;
 		e.ID = m_Buffer.Get<IDType>(offset);
 		offset += sizeof(IDType);
 		e.timestep = m_Buffer.Get<TimestepType>(offset);
@@ -969,7 +962,7 @@ private:
 
 //determine what type to use as IndexDescriptor based on number of properties we have
 template <size_t NumProperties>
-struct IndexDescTypeDeterminer
+struct IndexDescTypeHelper
 {
 	//go 2 less than number of bits since we use 2 bits to indicate other things
 	static_assert(NumProperties <= 62, "Maximum number of properties can only be 62");
@@ -990,12 +983,12 @@ struct IndexDescTypeDeterminer
 template<class ValueType, class TimestepType, class Cell>
 class CellTimeline :
 	public CellTimelineImpl<ValueType, TimestepType,
-	typename IndexDescTypeDeterminer<Cell::NumProperties>::Type,
+	typename IndexDescTypeHelper<Cell::NumProperties>::Type,
 	Cell>
 {
 public:
 	using ImplType = CellTimelineImpl<ValueType, TimestepType,
-		typename IndexDescTypeDeterminer<Cell::NumProperties>::Type,
+		typename IndexDescTypeHelper<Cell::NumProperties>::Type, 
 		Cell>;
 
 	CellTimeline() {}
@@ -1039,6 +1032,458 @@ using CellTimelineDD = CellTimeline<double, double, Cell<double>>;
 //values = float, timestep = double
 template<template<class> class Cell>
 using CellTimelineFD = CellTimeline<float, double, Cell<float>>;
+
+
+//TissueTimelineImlp as it is, is VERY SLOW. It stores a vector of Celltimelines
+//to store the cells. However, this is very inefficient for us since we generally
+//work with all the cells in the tissue at a particular index. What this means:
+//1. We load in buffer of first cell timeline into cache. 
+//2. Get the cell at i-th index from the timeline. 
+//3. Flush the cache and load in the second cell timeline
+//4. Get the cell at i-th index from the timeline. 
+//5. Flush the cache and load in the third cell timeline.
+// and so on and so on.
+//In other words, we have a cache miss each time we call GetVersion on tissue. This is 
+//very slow. We want our memory layout so that we have 
+//cell0Version0...cellnVersion0 cell0Version1...cellnVersion1 cell0Version2...cellnVersion2
+//This way we have all the data that we access at once in cache. 
+//However this means that TissueTimelineImpl can no longer be a simple wrapper around 
+//CellTimeline and will have to be its own proper implementation. But it is also true that
+//TissueTimeline speed will directly and proportionally affect the simulation speed. So 
+//guess it will have to be implemented at some point. 
+#pragma region OLD_PACKED_TISSUE_IMPLEMENTATION
+//OLD PackedTissueTimeline implementation class.
+/////////////////////////////////////////////////////////////////////////////////
+////Wrapper over CellTimeline so that it provides nicer interface for tissues. //
+/////////////////////////////////////////////////////////////////////////////////
+//template<class ValueType, class TimestepType, class IDType, size_t NumProperties>
+//class PackedTissueTimelineImpl
+//{
+//public:
+//	using CellTimelineType = CellTimelineImpl<ValueType, TimestepType, IDType, NumProperties>;
+//	using TissueType = PackedTissue<ValueType, NumProperties>;
+//
+//	struct Version
+//	{
+//		Version(size_t width, size_t height, size_t depth) :
+//			width{ width }, height{ height }, depth{ depth }
+//		{
+//		}
+//		TimestepType timestep = 0;
+//		TissueType tissue{ width, height, depth };
+//		size_t width, height, depth;
+//	};
+//
+//private:
+//	template<class VValueType, class VTimestepType>
+//	struct VersionPropertyImpl
+//	{
+//		VersionPropertyImpl(size_t width, size_t height, size_t depth) :
+//			width{ width }, height{ height }, depth{ depth }
+//		{
+//			values.resize(width* height* depth);
+//		}
+//		typename VValueType GetValue(int i) { return values[i]; }
+//		void SetValue(int i, float v) { values[i] = v; }
+//		typename VValueType GetValue(int x, int y, int z) { return values[Index(x, y, z)]; }
+//		void SetValue(int x, int y, int z, float v) { values[Index(x, y, z)] = v; }
+//		typename VTimestepType timestep = 0;
+//
+//	private:
+//		size_t Index(size_t x, size_t y, size_t z)
+//		{
+//			assert((x <= width - 1) && (y <= height - 1) && (z <= depth - 1) &&
+//				"Index out of range");
+//			return values[z * (width * height) + (y * width + x)];
+//		}
+//
+//	private:
+//		size_t width, height, depth;
+//		std::vector<typename VValueType> values;
+//	};
+//
+//public:
+//	using VersionProperty = VersionPropertyImpl<ValueType, TimestepType>;
+//
+//public:
+//	PackedTissueTimelineImpl(size_t x, size_t y, size_t z, size_t reserve) :
+//		m_Width{ x }, m_Height{ y }, m_Depth{ z }
+//	{
+//		m_Timelines.resize(Width()* Height()* Depth());
+//		for (auto& timeline : m_Timelines)
+//		{
+//			timeline.Reserve(reserve);
+//		}
+//	}
+//
+//	PackedTissueTimelineImpl(size_t x, size_t y, size_t z) :
+//		m_Width{ x }, m_Height{ y }, m_Depth{ z }
+//	{
+//		m_Timelines.resize(Width()* Height()* Depth());
+//	}
+//
+//	PackedTissueTimelineImpl(size_t x, size_t y, size_t z, 
+//		const TissueType& startingTissue, TimestepType timestep) :
+//		m_Width{ x }, m_Height{ y }, m_Depth{ z }
+//	{
+//		m_Timelines.resize(Width()* Height()* Depth());
+//		PushBack(startingTissue, timestep);
+//	}
+//
+//	virtual ~PackedTissueTimelineImpl()
+//	{
+//	}
+//
+//public:
+//	//iterator - just a wrapper around CellTimeline iterator
+//	class Iterator
+//	{
+//	public:
+//		using iterator_category = std::forward_iterator_tag;
+//		using value_type = Version;
+//		using difference_type = std::ptrdiff_t;
+//		using pointer = value_type*;
+//		using reference = value_type&;
+//
+//	public:
+//		Iterator() {}
+//		//Iterator does NOT modify timeline
+//		Iterator(PackedTissueTimelineImpl* timeline, size_t index) :
+//			timeline{ timeline }
+//		{
+//			m_Iterators.resize(timeline->Width() * timeline->Height() * timeline->Depth());
+//			for (int x = 0; x < timeline->Width(); x++)
+//			{
+//				for (int y = 0; y < timeline->Height(); y++)
+//				{
+//					for (int z = 0; z < timeline->Depth(); z++)
+//					{
+//						m_Iterators[timeline->Index(x, y, z)] =
+//							timeline->m_Timelines[timeline->Index(x, y, z)].begin(index);
+//					}
+//				}
+//			}
+//		}
+//
+//		Version operator*()
+//		{
+//			Version v{ timeline->Width(), timeline->Height(), timeline->Depth() };
+//
+//			for (int x = 0; x < timeline->Width(); x++)
+//			{
+//				for (int y = 0; y < timeline->Height(); y++)
+//				{
+//					for (int z = 0; z < timeline->Depth(); z++)
+//					{
+//						typename CellTimelineType::Version cv = *m_Iterators[timeline->Index(x, y, z)];
+//						v.tissue.SetCellAt(x, y, z, cv.cell);
+//						v.timestep = cv.timestep;
+//					}
+//				}
+//			}
+//			return v;
+//		}
+//
+//		VersionProperty GetVersionProperty(int prop)
+//		{
+//			VersionProperty vp{ timeline->Width(), timeline->Height(), timeline->Depth() };
+//			for (int x = 0; x < timeline->Width(); x++)
+//			{
+//				for (int y = 0; y < timeline->Height(); y++)
+//				{
+//					for (int z = 0; z < timeline->Depth(); z++)
+//					{
+//						typename CellTimelineType::VersionProperty cv =
+//							m_Iterators[timeline->Index(x, y, z)].GetVersionProperty(prop);
+//						vp.SetValue(x, y, z, cv.value);
+//						vp.timestep = cv.timestep;
+//					}
+//				}
+//			}
+//			return vp;
+//		}
+//
+//		CellTimelineType::VersionProperty GetCellVersionProperty(size_t index, int prop)
+//		{
+//			return m_Iterators[index].GetVersionProperty(prop);
+//		}
+//
+//		CellTimelineType::VersionProperty GetCellVersionProperty(size_t x, size_t y, size_t z, int prop)
+//		{
+//			return m_Iterators[timeline->Index(x, y, z)].GetVersionProperty(prop);
+//		}
+//
+//		uint32_t VersionChanges(size_t x, size_t y, size_t z)
+//		{
+//			return m_Iterators[timeline->Index(x, y, z)].GetVersionChanges();
+//		}
+//
+//		Iterator& operator++()
+//		{
+//			for (int i = 0; i < timeline->Width() * timeline->Height() * timeline->Depth(); i++)
+//			{
+//				++m_Iterators[i];
+//			}
+//			return *this;
+//		}
+//
+//		Iterator& operator++(int)
+//		{
+//			Iterator& tmp = *this;
+//			for (int i = 0; i < timeline->Width() * timeline->Height() * timeline->Depth(); i++)
+//			{
+//				++m_Iterators[i];
+//			}
+//			return tmp;
+//		}
+//
+//		Iterator& operator+=(int v)
+//		{
+//			if (v <= 0)
+//				return *this;
+//			for (int i = 0; i < timeline->Width() * timeline->Height() * timeline->Depth(); i++)
+//			{
+//				m_Iterators[i] += v;
+//			}
+//			return *this;
+//		}
+//
+//		// can compare any CellTimeline::Iterator for comparisions
+//		// since this class gurantees every CellTimeline will 
+//		// have the same number of cells
+//
+//		friend bool operator==(const Iterator& i1, const Iterator& i2)
+//		{
+//			return i1.m_Iterators[0] == i2.m_Iterators[0];
+//		}
+//
+//		friend bool operator!=(const Iterator& i1, const Iterator& i2)
+//		{
+//			return i1.m_Iterators[0] != i2.m_Iterators[0];
+//		}
+//
+//		friend bool operator<(const Iterator& i1, const Iterator& i2)
+//		{
+//			return i1.m_Iterators[0] < i2.m_Iterators[0];
+//		}
+//
+//		friend bool operator<=(const Iterator& i1, const Iterator& i2)
+//		{
+//			return i1.m_Iterators[0] <= i2.m_Iterators[0];
+//		}
+//
+//	private:
+//		std::vector<typename CellTimelineType::Iterator> m_Iterators;
+//		PackedTissueTimelineImpl* timeline = nullptr;
+//	};
+//
+//public:
+//	Iterator begin() const
+//	{
+//		return Iterator{ this, 0 };
+//	}
+//
+//	Iterator begin(size_t index) const
+//	{
+//		assert(index <= m_Size);
+//		return Iterator{ this, index };
+//	}
+//
+//	Iterator end() const
+//	{
+//		return Iterator{ this, m_Size };
+//	}
+//
+//	Iterator end(size_t index) const
+//	{
+//		assert(index <= m_Size);
+//		return Iterator{ this, m_Size };
+//	}
+//
+//public:
+//	//adds the given tissue to the timeline
+//	void PushBack(const TissueType& tissue, TimestepType timestep)
+//	{
+//		assert(tissue.Width() == Width() && tissue.Height() == Height() && tissue.Depth() == Depth() &&
+//		"Tissue shape and timeline shape dont match");
+//		for (int x = 0; x < tissue.Width(); x++)
+//		{
+//			for (int y = 0; y < tissue.Height(); y++)
+//			{
+//				for (int z = 0; z < tissue.Depth(); z++)
+//				{
+//					bool last = (x + 1) * (y + 1) * (z + 1) == Width() * Height() * Depth();
+//					m_Timelines[Index(x, y, z)].PushBack(tissue.GetCellAt(x, y, z), timestep, last);
+//				}
+//			}
+//		}
+//		m_Size++;
+//	}
+//
+//	//gets the given version of the tissue from the timeline
+//	Version GetVersion(size_t index) const
+//	{
+//		Version version{ Width(), Height(), Depth() };
+//		for (int x = 0; x < Width(); x++)
+//		{
+//			for (int y = 0; y < Height(); y++)
+//			{
+//				for (int z = 0; z < Depth(); z++)
+//				{
+//					typename CellTimelineType::Version v = m_Timelines[Index(x, y, z)].GetVersion(index);
+//					version.tissue.SetCellAt(x, y, z, v.cell);
+//					version.timestep = v.timestep;
+//				}
+//			}
+//		}
+//		return version;
+//	}
+//
+//	//get the changes in this particular version
+//	int VersionChanges(size_t x, size_t y, size_t z, size_t index) const
+//	{
+//		return m_Timelines[Index(x, y, z)].GetVersionChanges(index);
+//	}
+//
+//	//get the last tissue from the timeline
+//	Version LastVersion() const
+//	{
+//		Version version{ Width(), Height(), Depth() };
+//		for (int x = 0; x < Width(); x++)
+//		{
+//			for (int y = 0; y < Height(); y++)
+//			{
+//				for (int z = 0; z < Depth(); z++)
+//				{
+//					typename CellTimelineType::Version v = m_Timelines[Index(x, y, z)].GetLastVersion();
+//					version.tissue.SetCellAt(x, y, z, v.cell);
+//					version.timestep = v.timestep;
+//				}
+//			}
+//		}
+//		return version;
+//	}
+//
+//	//get the first tissue from the timeline
+//	Version FirstVersion() const
+//	{
+//		Version version{ Width(), Height(), Depth() };
+//		for (int x = 0; x < Width(); x++)
+//		{
+//			for (int y = 0; y < Height(); y++)
+//			{
+//				for (int z = 0; z < Depth(); z++)
+//				{
+//					typename CellTimelineType::Version v = m_Timelines[Index(x, y, z)].GetFirstVersion();
+//					version.tissue.SetCellAt(x, y, z, v.cell);
+//					version.timestep = v.timestep;
+//				}
+//			}
+//		}
+//		return version;
+//	}
+//
+//	//number of tissues in the timeline
+//	size_t Size() const
+//	{
+//		return m_Size;
+//	}
+//
+//	bool Empty() const
+//	{
+//		return !m_Size;
+//	}
+//
+//	size_t SizeInBytes() const
+//	{
+//		size_t size = 0;
+//		for (auto& t : m_Timelines)
+//			size += t.SizeInBytes();
+//		return size;
+//	}
+//
+//	//we give out cell timeline by const reference because we dont wanna let anyone
+//	//add to the timeline since we have to enfore the size rule of the tissue (if
+//	//a cell is added to one timeline, it has to be added to all the other timelines
+//	//to maintain the shape of the tissue)
+//	const CellTimelineType& GetCellTimeline(size_t x, size_t y, size_t z) const
+//	{
+//		return m_Timelines[Index(x, y, z)];
+//	}
+//
+//public:
+//	size_t Width() const { return m_Width; }
+//	size_t Height() const { return m_Height; }
+//	size_t Depth() const { return m_Depth; }
+//
+//private:
+//	size_t Index(size_t x, size_t y, size_t z) const
+//	{
+//		assert((x <= m_Width - 1) && (y <= m_Height - 1) && (z <= m_Depth - 1) &&
+//			"Index out of range");
+//		return z * (m_Width * m_Height) + (y * m_Width + x);
+//	}
+//
+//private:
+//	size_t m_Width;
+//	size_t m_Height;
+//	size_t m_Depth;
+//	size_t m_Size = 0;
+//
+//private:
+//	std::vector<CellTimelineType> m_Timelines;
+//};
+
+#pragma endregion OLD_PACKED_TISSUE_IMPLEMENTATION
+
+//////////////////////////////////////////////
+//////////////////////////////////////////////
+//////// Main PackedTissueTimeline class /////
+//////////////////////////////////////////////
+//////////////////////////////////////////////
+//
+//template<class ValueType, class TimestepType, size_t NumProperties>
+//class PackedTissueTimeline :
+//	public PackedTissueTimelineImpl<ValueType, TimestepType,
+//	typename IndexDescTypeHelper<NumProperties>::Type, NumProperties>
+//{
+//public:
+//	using ImplType = PackedTissueTimelineImpl<ValueType, TimestepType,
+//		typename IndexDescTypeHelper<NumProperties>::Type, NumProperties>;
+//
+//	PackedTissueTimeline(size_t x, size_t y, size_t z, size_t reserve) :
+//		ImplType{ x, y, z, reserve }
+//	{
+//	}
+//
+//	PackedTissueTimeline(size_t x, size_t y, size_t z) :
+//		ImplType{ x, y, z }
+//	{
+//	}
+//
+//	PackedTissueTimeline(size_t x, size_t y, size_t z, 
+//		typename const ImplType::TissueType& startingTissue, TimestepType timestep) :
+//		ImplType{ x, y, z, startingTissue, timestep }
+//	{
+//	}
+//};
+//
+////for convenience 
+////values = float, timestep = float
+//template<size_t NumProperties>
+//using PackedTissueTimelineFF = PackedTissueTimeline<float, float, NumProperties>;
+//
+////values = double, timestep = float
+//template<size_t NumProperties>
+//using PackedTissueTimelineDF = PackedTissueTimeline<double, float, NumProperties>;
+//
+////values = double, timestep = double
+//template<size_t NumProperties>
+//using PackedTissueTimelineDD = PackedTissueTimeline<double, double, NumProperties>;
+//
+////values = float, timestep = double
+//template<size_t NumProperties>
+//using PackedTissueTimelineFD = PackedTissueTimeline<float, double, NumProperties>;
 
 //dont be like Windows.h
 #undef LIKELY
