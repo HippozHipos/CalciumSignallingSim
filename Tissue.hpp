@@ -59,7 +59,7 @@ template<class ValueType>
 class PackedTissue
 {
 public:
-	using TypeList = PackedTissueCellTypes<ValueType>;
+	using TypeList = generated::PackedTissueCellTypes<ValueType>;
 	using CellType = StemCell<ValueType>;
 	int NumGapJunctions = 1;
 
@@ -76,6 +76,8 @@ private:
 				cells[i] = neighbours[i];
 			}
 		}
+
+		CellType* operator[](size_t index) { return cells[index]; }
 		CellType* cells[Count];
 	};
 
@@ -128,7 +130,7 @@ public:
 
 		m_Cells.resize(tissueSize);
 
-		assert(tissueSize == typeListSize && 
+		assert(tissueSize == typeListSize &&
 			"Type list size doesn't match the number of cells in the tissue");
 
 		size_t allocSize = TissueCellTypeList_SizeBytes<ValueType>(typelist);
@@ -136,9 +138,10 @@ public:
 
 		size_t offset = 0;
 
+		auto outer = generated::PackedTissueCellValues<ValueType>.begin();
 		TissueCellTypeList_ConstexprForEach<typeListSize>
-		(
-				[&offset, typelist, this](auto index)
+			(
+				[&offset, typelist, &outer, this](auto index)
 				{
 					constexpr size_t i = decltype(index)::I;
 					constexpr size_t numProps = CellTypeAt<i, TypeList>::type::NumProperties;
@@ -146,10 +149,13 @@ public:
 					{
 						new (m_CellStore + offset) ValueType[numProps]
 					};
+					auto inner = (*outer).begin();
 					for (size_t j = 0; j < numProps; j++)
 					{
-						m_Cells[i]->SetAt(j, std::numeric_limits<ValueType>::max());
+						m_Cells[i]->SetAt(j, *inner);
+						inner++;
 					}
+					outer++;
 					offset += numProps * sizeof(ValueType);
 				}
 		);
@@ -192,12 +198,12 @@ public:
 public:
 	CellType* GetCell(size_t x, size_t y, size_t z)
 	{
-		return m_Cells[Index(x, y, z)]; 
+		return m_Cells[Index(x, y, z)];
 	}
 
-	const CellType* const GetCellAt(size_t x, size_t y, size_t z) const 
-	{ 
-		return m_Cells[Index(x, y, z)]; 
+	const CellType* const GetCellAt(size_t x, size_t y, size_t z) const
+	{
+		return m_Cells[Index(x, y, z)];
 	}
 
 	CellType* const GetCell(size_t i)
@@ -205,13 +211,13 @@ public:
 		return m_Cells[i];
 	}
 
-	const CellType* GetCellAt(size_t i) const 
-	{ 
+	const CellType* GetCellAt(size_t i) const
+	{
 		return m_Cells[i];
 	}
 
 	//the 2d axis is always the same as the layer axis.
-	Neighbours2D GetNeighbours2D(size_t x, size_t y, size_t z)
+	Neighbours2D GetNeighbours2D(size_t x, size_t y, size_t z) const
 	{
 		assert((x <= m_Width - 1) && (y <= m_Height - 1) && (x <= m_Depth - 1));
 		CellType* cells[Neighbours2D::Count] = { nullptr };
@@ -234,7 +240,7 @@ public:
 		return Neighbours2D{ cells };
 	}
 
-	Neighbours2DNoDiag GetNeighbours2DNoDiag(size_t x, size_t y, size_t z)
+	Neighbours2DNoDiag GetNeighbours2DNoDiag(size_t x, size_t y, size_t z) const
 	{
 		assert((x <= m_Width - 1) && (y <= m_Height - 1) && (x <= m_Depth - 1));
 		CellType* cells[Neighbours2DNoDiag::Count] = { nullptr };
@@ -269,7 +275,7 @@ public:
 					int _x = xx + x; int _y = yy + y; int _z = zz + z;
 					if (_x >= 0 && _x < Width() && _y >= 0 && _y < Height() && _z >= 0 && _z < Depth())
 					{
-						cells[index] = GetCell(_x, _y, _z);
+						cells[index] = m_Cells[Index(_x, _y, _z)];
 					}
 					index++;
 				}
@@ -279,7 +285,7 @@ public:
 		return Neighbours3D{ cells };
 	}
 
-	Neighbours3DNoDiag GetNeighbours3DNoDiag(size_t x, size_t y, size_t z)
+	Neighbours3DNoDiag GetNeighbours3DNoDiag(size_t x, size_t y, size_t z) const
 	{
 		CellType* cells[Neighbours3DNoDiag::Count] = { nullptr };
 		if (x > 0)
@@ -325,7 +331,11 @@ private:
 	size_t m_Depth;
 
 	//heap pointer where cells are stored
-	uint8_t* m_CellStore;
+#ifdef TISSUE_MEMORY_BUFFER_ALIGNMENT
+	alignas(TISSUE_MEMORY_BUFFER_ALIGNMENT) uint8_t* m_CellStore;
+#else
+	alignas(long double) uint8_t* m_CellStore;
+#endif
 
 	//pointers to individual cells within m_CellStore.
 	//vector never resizes
@@ -350,13 +360,15 @@ template<class ValueType>
 class GraphTissue
 {
 public:
-	using TypeList = GraphTissueCellTypes<ValueType>;
+	using TypeList = generated::GraphTissueCellTypes<ValueType>;
 	using CellType = StemCell<ValueType>;
 
 	struct Entry
 	{
-		Entry(size_t size) 
-		{ connections.reserve(size); gapJunctions.reserve(size); }
+		Entry(size_t size)
+		{
+			connections.reserve(size); gapJunctions.reserve(size);
+		}
 		std::vector<size_t> connections;
 		std::vector<size_t> gapJunctions;
 		CellType* cell = nullptr;
@@ -376,8 +388,8 @@ public:
 
 		m_Cells.resize(typeListSize);
 
-		assert(typeListSize == GraphTissueConnections.size() &&
-			GraphTissueConnections.size() == GraphTissueGapJunctions.size() &&
+		assert(typeListSize == generated::GraphTissueConnections.size() &&
+			generated::GraphTissueConnections.size() == generated::GraphTissueGapJunctions.size() &&
 			"Invalid Tissue info");
 
 		size_t allocSize = TissueCellTypeList_SizeBytes<ValueType>(typelist);
@@ -400,8 +412,8 @@ public:
 						m_Cells[i]->SetAt(j, std::numeric_limits<ValueType>::max());
 					}
 					SetCellConnectionsAndGapJunctions(
-						*(GraphTissueConnections.begin() + i),
-						*(GraphTissueGapJunctions.begin() + i),
+						*(generated::GraphTissueConnections.begin() + i),
+						*(generated::GraphTissueGapJunctions.begin() + i),
 						i);
 					offset += numProps * sizeof(ValueType);;
 				}
@@ -487,14 +499,14 @@ public:
 		return GetConnectionsOrGapJunctions(index, m_GapJunctions);
 	}
 
-	std::pair<std::vector<size_t>::iterator, std::vector<size_t>::iterator> 
-	GetConnectionsView(size_t index)
+	std::pair<std::vector<size_t>::iterator, std::vector<size_t>::iterator>
+		GetConnectionsView(size_t index)
 	{
 		return GetConnectionsOrGapJunctionsView(index, m_Connections);
 	}
 
 	std::pair<std::vector<size_t>::iterator, std::vector<size_t>::iterator>
-	GetGapJunctionsView(size_t index)
+		GetGapJunctionsView(size_t index)
 	{
 		return GetConnectionsOrGapJunctionsView(index, m_GapJunctions);
 	}
@@ -513,7 +525,7 @@ public:
 		{
 			connections.push_back(con.first[i]);
 			gapJunctions.push_back(gap.first[i]);
-		}	
+		}
 	}
 
 	void GetConnectionsAndGapJunctionsView(size_t index,
@@ -603,8 +615,8 @@ private:
 				auto connectionOther = GetConnectionsView(connections[i]);
 				if (
 					std::find(connectionOther.first, connectionOther.second, index)
-													== 
-										connectionOther.second
+					==
+					connectionOther.second
 					)
 				{
 					//connection doesnt exist so add it
@@ -634,7 +646,7 @@ private:
 
 	void SetCellConnectionsAndGapJunctions(
 		const std::initializer_list<size_t>& connections,
-		const std::initializer_list<size_t>& gapJunctions, 
+		const std::initializer_list<size_t>& gapJunctions,
 		size_t index)
 	{
 		SetCellConnectionsAndGapJunctions(connections, gapJunctions, index);
@@ -642,18 +654,18 @@ private:
 
 	void SetCellConnectionsAndGapJunctions(
 		const std::vector<size_t>& connections,
-		const std::vector<size_t>& gapJunctions, 
+		const std::vector<size_t>& gapJunctions,
 		size_t index)
 	{
 		SetCellConnectionsAndGapJunctions(connections, gapJunctions, index);
 	}
 
-	std::vector<size_t> 
-	GetConnectionsOrGapJunctions(size_t index, std::vector<size_t>& data)
+	std::vector<size_t>
+		GetConnectionsOrGapJunctions(size_t index, std::vector<size_t>& data)
 	{
 		std::pair<std::vector<size_t>::iterator, std::vector<size_t>::iterator> it =
 			GetConnectionsOrGapJunctionsView(index, data);
-		
+
 		std::vector<size_t> out;
 		out.reserve(it.second - it.first);
 		for (auto _it = it.first; _it < it.second; _it++)
@@ -663,8 +675,8 @@ private:
 		return out;
 	}
 
-	std::pair<std::vector<size_t>::iterator, std::vector<size_t>::iterator> 
-	GetConnectionsOrGapJunctionsView(size_t index, std::vector<size_t>& data)
+	std::pair<std::vector<size_t>::iterator, std::vector<size_t>::iterator>
+		GetConnectionsOrGapJunctionsView(size_t index, std::vector<size_t>& data)
 	{
 		assert(index < m_Cells.size());
 		size_t itStartIndex = 0;
@@ -716,7 +728,11 @@ private:
 	std::vector<size_t> m_GapJunctions;
 
 	//heap pointer where cells are stored
-	uint8_t* m_CellStore;
+#ifdef TISSUE_MEMORY_BUFFER_ALIGNMENT
+	alignas(TISSUE_MEMORY_BUFFER_ALIGNMENT) uint8_t* m_CellStore;
+#else
+	alignas(long double) uint8_t* m_CellStore;
+#endif
 
 	//pointers to individual cells within m_CellStore.
 	//vector never resizes

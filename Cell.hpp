@@ -11,6 +11,7 @@ class StemCell;
 
 //Convenience. 
 #define CELL_DERIVED_COMMONS(name, T, N) \
+	static_assert(std::is_arithmetic_v<T>);\
 	using ValueType = T; \
 	static constexpr size_t NumProperties = N; \
 	/*default constrcutor*/\
@@ -37,6 +38,8 @@ class StemCell;
 			this->Set(i, v);\
 		}\
 	}\
+	/*should probably write our own stringize*/\
+	const char* GetName() const { return _CRT_STRINGIZE(name); }\
 	constexpr size_t GetNumProperties() const { return NumProperties; } 
 
 //Base cell class
@@ -50,7 +53,10 @@ public:
 	}
 
 public:
-	virtual const char* GetNameFromIndex(size_t index) = 0;
+	virtual const char* GetNameFromIndex(size_t index) const = 0;
+	virtual constexpr size_t GetNumProperties() const = 0;
+	virtual const char* GetName() const = 0;
+	virtual int GetID() const = 0;
 
 public:
 	ValueType& operator[](size_t index)
@@ -73,7 +79,6 @@ public:
 		m_Properties[index] = v; 
 	}
 
-
 private:
 	StaticHeapArray<ValueType> m_Properties;
 };
@@ -81,14 +86,19 @@ private:
 template<class T>
 class Astrocyte : public StemCell<T>
 {
-	static_assert(std::is_arithmetic_v<T>);
+	;
 public:
 	CELL_DERIVED_COMMONS(Astrocyte, T, 30)
 
 public:
-	const char* GetNameFromIndex(size_t index) override
+	const char* GetNameFromIndex(size_t index) const override
 	{
 		return "";
+	}
+
+	int GetID() const override
+	{
+		return 0;
 	}
 };
 
@@ -96,14 +106,18 @@ public:
 template<class T>
 class SmoothMuscle : public StemCell<T>
 {
-	static_assert(std::is_arithmetic_v<T>);
 public:
 	CELL_DERIVED_COMMONS(SmoothMuscle, T, 5)
 
 public:
-	const char* GetNameFromIndex(size_t index) override
+	const char* GetNameFromIndex(size_t index) const override
 	{
 		return "";
+	}
+
+	int GetID() const override
+	{
+		return 1;
 	}
 };
 

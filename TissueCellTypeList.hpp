@@ -9,8 +9,8 @@
 //to allocate for different types of cells at compile time
 
 //typelist
-template <class... CellTypes>   
-struct TissueCellTypeList {};   
+template <class... CellTypes>
+struct TissueCellTypeList {};
 
 //utility to verify that the given type is derived form StemCell
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -111,13 +111,13 @@ constexpr size_t TissueCellTypeList_SizeBytes(TissueCellTypeList<Types...> types
 
     size_t size = 0;
     TissueCellTypeList_ConstexprForEach<sizeof...(Types)>
-    (
+        (
             [&size, types](auto index)
             {
-            size +=
-                CellTypeAt<
-                        decltype(index)::I,
-                        TissueCellTypeList<Types...>
+                size +=
+                    CellTypeAt<
+                    decltype(index)::I,
+                    TissueCellTypeList<Types...>
                     >::type::NumProperties * sizeof(T_);
             }
     );
